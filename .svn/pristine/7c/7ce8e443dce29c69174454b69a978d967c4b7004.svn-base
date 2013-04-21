@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>A'ris entia</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="/static/css/bootstrap.min.css" rel="stylesheet" media="screen">
+    <link href="/static/css/slider.css" rel="stylesheet" media="screen">
+
+    <link href="/static/css/styles.css" rel="stylesheet" media="screen">
+
+    <script src="/static/js/jquery.js"></script>
+    <script src="/static/js/bootstrap.min.js"></script>
+    <script src="/static/js/bootstrap-slider.js"></script>
+
+
+    <script src="https://maps.googleapis.com/maps/api/js?v=3.exp&sensor=true"></script>
+    <script src="/static/js/markers.js"></script>
+
+    <script>
+        $(function() {
+            flights = [];
+
+            $("#map").height(($(window).height()*8)/10);
+            var stylesArray = [ { "featureType": "administrative.locality", "elementType": "labels", "stylers": [ { "visibility": "off" } ] },{ "featureType": "water", "stylers": [ { "hue": "#00ccff" }, { "color": "#000028" } ] },{ "featureType": "landscape.natural", "elementType": "geometry.fill", "stylers": [ { "color": "#004100" } ] },{ "featureType": "road", "stylers": [ { "visibility": "off" } ] },{ "featureType": "poi", "stylers": [ { "visibility": "off" } ] },{ "featureType": "administrative.province", "elementType": "labels.text", "stylers": [ { "visibility": "on" } ] },{ "featureType": "administrative.province", "elementType": "geometry.stroke", "stylers": [ { "visibility": "on" }, { "weight": 0 }, { "color": "#005a00" } ] },{ "featureType": "landscape.natural" } ];
+
+            var mapOptions = {
+                zoom: 8,
+                center: new google.maps.LatLng(-1.3491337914139983,-78.83757575390628),
+                mapTypeId: google.maps.MapTypeId.ROADMAP
+            };
+            map = new google.maps.Map($('#map').get(0), mapOptions);
+            map.setOptions({styles: stylesArray});
+
+            days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+            lastValue = 0;
+
+            updateFlights = function(data) {
+                for (var i in markers) {
+                    var marker = markers[i];
+                    marker.setMap(null);
+                }
+                markers = [];
+                for (var i in data.flights) {
+                    var flight = data.flights[i];
+                    var marker = new google.maps.Marker({
+                        draggable: false,
+                        raiseOnDrag: false,
+                        icon: planeImages[flight.planeshape],
+{#                        shadow: airporShadow,#}
+{#                        shape: airportShape,#}
+                        map: map,
+                        title: flight.name,
+                        position: new google.maps.LatLng(flight.clat, flight.clng)
+                    });
+                    marker.flight = flight;
+                    markers.push(marker);
+                }
+                $("#concurrent").html(markers.length);
+                var list = [];
+                for (var i in markers) {
+                    var marker = markers[i];
+                    var flight = marker.flight;
+                    list.push("<li>"+flight.name+"</li>");
+                }
+                $("#concurrentplanes").html("<ol>"+list.join("")+"</ol>");
+            };
+
+            calculateMoment = function(value) {
+                var dayOfWeek = parseInt(value/288);
+                var rema = (value%288)*5;
+                var hour = Math.floor(rema/60);
+                var min = rema%60;
+                lastValue = value;
+                var v = days[dayOfWeek]+" "+((hour<10)?"0":"")+hour+":"+((min<10)?"0":"")+min;
+                $("#currenttime").html(v);
+                return v;
+
+            };
+
+            $('#sl1').slider({
+                formater: calculateMoment,
+                min: 0,
+                max: 2015,
+                value: 0
+
+            }).on('slideStop', function(ev) {
+                        $.post("/onair/"+lastValue,"",function(data) {
+                            updateFlights(data);
+                        }, "json");
+            });
+            $(".slider").width($("#sl1well").width());
+            {% autoescape off %}
+            airports = [
+                {% for airport in airports %}
+                {'id': {{ airport.id }}, 'name': '{{ airport.name }}', 'symbol': '{{ airport.symbol }}', 'lat': {{airport.lat}}, 'lng': {{ airport.lng }} },
+                {% endfor %}
+            ];
+            {% endautoescape %}
+            for (var i in airports) {
+                var airport = airports[i];
+                var marker = new google.maps.Marker({
+                    draggable: false,
+                    raiseOnDrag: false,
+                    icon: airporImage,
+                    shadow: airporShadow,
+                    shape: airportShape,
+                    map: map,
+                    title: airport.name + " ("+airport.symbol+")",
+                    position: new google.maps.LatLng(airport.lat, airport.lng)
+                });
+                //google.maps.event.addListener(marker, 'click', abrirInfoWindow);
+            }
+
+            interval = null;
+            index = 0;
+            simulation = [];
+            markers = [];
+
+            incrementIndex = function() {
+                $("#sl1").slider('setValue', index);
+                updateFlights(simulation[index]);
+                index += 1;
+                if (index>2015) {
+                    $("#btnstop").trigger("click");
+                }
+            }
+
+            $("#btnplay").click(function() {
+                $("#btnplay").attr("disabled","disabled");
+                $("#btnstop").removeAttr("disabled");
+                index = 0;
+                $.post("/simulation",{}, function(data) {
+                    simulation = data;
+                    interval = self.setInterval(incrementIndex,100);
+                }, "json");
+
+            });
+            $("#btnstop").click(function() {
+                $("#btnstop").attr("disabled","disabled");
+                $("#btnplay").removeAttr("disabled");
+                interval = window.clearInterval(interval);
+            });
+
+
+        });
+    </script>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row-fluid">
+            <div class="span8">
+                <h4>Simulation Map</h4>
+                <div id="map"></div>
+                <div class="well" id="sl1well">
+                    <input type="text" style="width: 100%;" value="0" id="sl1" >
+                </div>
+            </div>
+            <div class="span4">
+                <h4>Simulation Statistics</h4>
+                <div class="well">
+                    <a href="#" class="btn" id="btnplay"><i class="icon-play"></i></a>
+                    <a href="#" class="btn" id="btnstop" disabled><i class="icon-stop"></i></a>
+                    <span id="currenttime" class="bigger">0:00</span>
+                </div>
+
+                    <table class="table table-bordered table-striped">
+                        <tbody>
+                            <tr>
+                                <td width="50%">Concurrent</td>
+                                <td id="concurrent">0</td>
+                            </tr>
+                            <tr>
+                                <td>Planes</td>
+                                <td id="concurrentplanes"></td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+            </div>
+        </div>
+    </div>
+</body>
+</html>

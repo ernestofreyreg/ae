@@ -1,0 +1,91 @@
+# Create your views here.
+from datetime import time
+import json
+from django.forms import model_to_dict
+from django.http import HttpResponse
+from django.shortcuts import render_to_response
+import math
+from air.models import Airport, Flight
+
+
+def index(request):
+    data = {}
+    data['airports'] = Airport.objects.all()
+    return render_to_response("base.html", data)
+
+def minutes(t):
+    return t.hour * 60 + t.minute
+
+def angle(s,d):
+    a = math.atan2((d.lat-s.lat),(d.lng-s.lng))
+    if a<0:
+        a = (math.pi*2) + a
+    return a
+
+def convert_flight(f, t):
+    x = model_to_dict(f, exclude=['departure','arrival'])
+    x['departure'] = f.departure.strftime('%H:%M')
+    x['arrival'] = f.arrival.strftime('%H:%M')
+    dlat = f.destination.lat - f.origin.lat
+    dlng = f.destination.lng - f.origin.lng
+
+    duration = float(minutes(f.arrival)-minutes(f.departure))
+    elapsed = float(minutes(t) - minutes(f.departure))
+    dt = elapsed/duration
+
+    x['planeshape'] = math.floor(((angle(f.origin, f.destination)/(math.pi*2))*360)/22)
+    x['clat'] = f.origin.lat + (dlat*dt)
+    x['clng'] = f.origin.lng + (dlng*dt)
+    return x
+
+def convert_flight_simple(f, t):
+    x = model_to_dict(f, exclude=['departure','arrival'])
+    x['departure'] = f.departure.strftime('%H:%M')
+    x['arrival'] = f.arrival.strftime('%H:%M')
+    if f.departure == t:
+        x['action'] = 'takeoff'
+    elif f.arrival == t:
+        x['action'] = 'landing'
+
+    return x
+
+
+
+def onair(request,moment):
+    data = {}
+    m = int(moment)
+    data['moment'] = moment
+    day = (m/288)+1
+    data['dayofweek'] = day
+    rema = (m%288)*5
+    hour = int(rema/60)
+    min = rema%60
+    data['hour'] = hour
+    data['min'] = min
+    t = time(hour=hour,minute=min)
+
+    flights = Flight.objects.filter(day=day, departure__lte=t, arrival__gte=t)
+    data['flights'] = [convert_flight(x, t) for x in flights]
+
+
+    return HttpResponse(json.dumps(data), mimetype="application/json")
+
+
+def simulation(request):
+    alldata = []
+    for m in range(2016):
+        data = {}
+        data['moment'] = m
+        day = (m/288)+1
+        data['dayofweek'] = day
+        rema = (m%288)*5
+        hour = int(rema/60)
+        minute = rema%60
+        data['hour'] = hour
+        data['min'] = minute
+        t = time(hour=hour,minute=minute)
+
+        flights = Flight.objects.filter(day=day, departure__lte=t, arrival__gte=t)
+        data['flights'] = [convert_flight_simple(x, t) for x in flights if x.departure==t or x.arrival==t]
+        alldata.append(data)
+    return HttpResponse(json.dumps(alldata), "application/json")
